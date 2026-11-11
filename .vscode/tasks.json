@@ -1,0 +1,13 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    { "label": "Compilar tudo", "type": "shell", "command": "make all",
+      "group": { "kind": "build", "isDefault": true }, "problemMatcher": ["$gcc"] },
+    { "label": "Validar (hash vs baseline)", "type": "shell", "command": "make test",
+      "group": "test", "problemMatcher": [] },
+    { "label": "Perfilar baseline", "type": "shell", "command": "make perfil", "problemMatcher": [] },
+    { "label": "Medir (gera CSV)", "type": "shell", "command": "make medir", "problemMatcher": [] },
+    { "label": "Gerar graficos", "type": "shell", "command": "make graficos", "problemMatcher": [] },
+    { "label": "Limpar", "type": "shell", "command": "make clean", "problemMatcher": [] }
+  ]
+}

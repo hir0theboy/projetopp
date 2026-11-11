@@ -1,0 +1,17 @@
+{
+  "configurations": [
+    {
+      "name": "Linux (g++ + OpenMP + OpenMPI)",
+      "includePath": [
+        "${workspaceFolder}/**",
+        "/usr/lib/x86_64-linux-gnu/openmpi/include",
+        "/usr/lib/aarch64-linux-gnu/openmpi/include"
+      ],
+      "defines": ["_OPENMP"],
+      "compilerPath": "/usr/bin/g++",
+      "cStandard": "c17",
+      "cppStandard": "c++17"
+    }
+  ],
+  "version": 4
+}
