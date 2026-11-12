@@ -10,7 +10,7 @@ Este relatório descreve a paralelização do código sequencial de referência 
 
 As medições, feitas em um notebook com Intel Core i5-13420H, mostram speedups máximos de 3,06× (N=500, OpenMP), 2,73× (N=1000, MPI) e 1,49× (N=2000, OpenMP), muito abaixo dos limites de Amdahl (35× a 55×). A causa dominante é o limite de banda de memória: o stencil realiza apenas 4 operações de ponto flutuante para cerca de 24 bytes movidos por atualização. Observa-se ainda queda de desempenho com 12 threads, compatível com a mistura de núcleos de desempenho e de eficiência do processador combinada com escalonamento estático, e um overhead de comunicação no MPI que cresce de 3,8% a 81,4% do tempo conforme N diminui e o número de processos aumenta.
 
-## 1. Objetivos e escopo {#objetivos-e-escopo}
+## 1. Objetivos e escopo 
 
 O objetivo do projeto, conforme as orientações da disciplina, não é apenas escrever código paralelo, mas transformar o código sequencial fornecido em versões paralelas que produzam o mesmo resultado em menos tempo, medindo rigorosamente o ganho e explicando por que o ganho real difere do teórico. O trabalho cobre:
 
@@ -24,9 +24,9 @@ O objetivo do projeto, conforme as orientações da disciplina, não é apenas e
 
 Restrição do enunciado respeitada: a lógica de cálculo e a entrada do código sequencial não foram alteradas. Ele define o resultado correto.
 
-## 2. O problema e o algoritmo sequencial {#o-problema-e-o-algoritmo-sequencial}
+## 2. O problema e o algoritmo sequencial 
 
-### 2.1 Modelo {#modelo}
+### 2.1 Modelo 
 
 A equação do calor em 2D, ∂u/∂t = α∇²u, é discretizada por diferenças finitas explícitas com o laplaciano de 5 pontos (o ponto central e seus quatro vizinhos):
 
@@ -34,7 +34,7 @@ u_novo(i,j) = u(i,j) + r · \[u(i−1,j) + u(i+1,j) + u(i,j−1) + u(i,j+1) − 
 
 No código do professor, r = 1/4, que é o limite de estabilidade do método explícito em 2D. Com esse valor o termo do ponto central se cancela e resta u_novo = 0,25 · (soma dos 4 vizinhos), que é exatamente a iteração de Jacobi. Por isso o código lê quatro posições, embora o esquema seja chamado de stencil de 5 pontos.
 
-### 2.2 O programa de referência {#o-programa-de-referência}
+### 2.2 O programa de referência 
 
 - Grade N×N de doubles, armazenada em ordem de linhas (row-major), com dois buffers (u e un) trocados a cada passo.
 
@@ -44,17 +44,17 @@ No código do professor, r = 1/4, que é o limite de estabilidade do método exp
 
 - Saída: checksum (soma de todas as células) e tempo (apenas o laço de passos).
 
-### 2.3 Complexidade e intensidade aritmética {#complexidade-e-intensidade-aritmética}
+### 2.3 Complexidade e intensidade aritmética 
 
 - Tempo: O(N²·T). Memória: O(N²), com 2·8·N² bytes para os dois buffers (4 MB com N=500; 16 MB com N=1000; 64 MB com N=2000).
 
 - Cada atualização faz 4 operações de ponto flutuante (3 somas e 1 multiplicação). Estimando cerca de 24 bytes de tráfego de memória por atualização (leitura do dado novo, leitura para alocação de linha na escrita e write-back), a intensidade aritmética é de aproximadamente 0,17 operação por byte. Isso é muito baixo: o stencil tende a ser limitado pela memória, não pelo processador. Essa característica explica a maior parte dos resultados da seção 8.
 
-### 2.4 Limitação do checksum como validador {#limitação-do-checksum-como-validador}
+### 2.4 Limitação do checksum como validador 
 
 O esquema conserva a massa: a soma da grade permanece em torno de 100 enquanto o calor não chega à borda. Com os parâmetros padrão (500×500, 500 passos) o checksum é 100,000000 mesmo que a troca de bordas esteja errada. Por isso a validação do projeto usa também um hash da grade inteira (seção 7).
 
-## 3. Ambiente e metodologia {#ambiente-e-metodologia}
+## 3. Ambiente e metodologia 
 
 | Item | Valor |
 |----|----|
@@ -69,7 +69,7 @@ O esquema conserva a massa: a soma da grade permanece em torno de 100 enquanto o
 
 Todos os tempos medem apenas o laço de passos, como no código original. O script scripts/medir.sh gera os CSVs e o scripts/plotar.py produz os gráficos e tabelas.
 
-## 4. Baseline e perfilamento {#baseline-e-perfilamento}
+## 4. Baseline e perfilamento 
 
 Foi criada uma cópia instrumentada do baseline (calor2d_ref.cpp), com a mesma lógica, que cronometra cada trecho e imprime o hash da grade final. O baseline original foi mantido intocado em sequencial/05_calor2d.cpp.
 
@@ -91,9 +91,9 @@ Previsão de Amdahl, S(p) = 1 / ((1−f) + f/p):
 
 Tempos de referência do baseline durante a coleta (mediana): 0,0855 s (N=500), 0,508 s (N=1000) e 2,330 s (N=2000).
 
-## 5. Versão OpenMP {#versão-openmp}
+## 5. Versão OpenMP
 
-### 5.1 Padrão e decisões de projeto {#padrão-e-decisões-de-projeto}
+### 5.1 Padrão e decisões de projeto 
 
 - **Padrão:** laço paralelo (omp for) sobre as linhas da grade. Cada thread recebe um bloco de linhas, e o laço interno percorre as colunas na ordem de memória.
 
@@ -103,7 +103,7 @@ Tempos de referência do baseline durante a coleta (mediana): 0,0855 s (N=500), 
 
 - **First-touch:** a grade é inicializada em paralelo com schedule(static), para que as páginas de memória fiquem próximas das threads que as usarão (relevante em máquinas NUMA).
 
-### 5.2 Condições de corrida {#condições-de-corrida}
+### 5.2 Condições de corrida 
 
 - **Stencil: não há corrida.** Cada passo lê somente cur e escreve somente nxt (dois buffers), e cada thread escreve em linhas distintas. A barreira implícita ao final do omp for garante que o passo t termine antes do passo t+1.
 
@@ -123,7 +123,7 @@ Tempos de referência do baseline durante a coleta (mediana): 0,0855 s (N=500), 
 
 ## 6. Versão MPI {#versão-mpi}
 
-### 6.1 Decomposição de domínio {#decomposição-de-domínio}
+### 6.1 Decomposição de domínio 
 
 Decomposição 1D por faixas de linhas (row-block). As N linhas são divididas em P blocos contíguos; os primeiros N mod P processos recebem uma linha a mais, o que trata N não divisível por P. Cada processo armazena suas linhas mais duas linhas fantasma (halo): a de cima e a de baixo, cópias das linhas de borda dos vizinhos. Como a grade é row-major, cada linha de halo é um bloco contíguo de N doubles, sem necessidade de tipos derivados do MPI.
 
@@ -139,7 +139,7 @@ A cada passo, antes de calcular, cada processo executa duas chamadas MPI_Sendrec
 
 MPI_Sendrecv evita deadlock sem depender de ordem de envio e recepção. Nas pontas usa-se MPI_PROC_NULL, que transforma a operação em no-op. As linhas globais 0 e N−1 permanecem fixas em 0, como no baseline, e o processo dono da linha N/2 inicializa a fonte quente.
 
-### 6.3 Operações coletivas {#operações-coletivas}
+### 6.3 Operações coletivas 
 
 - MPI_Bcast: distribui os parâmetros (N e T) a partir do processo 0.
 
@@ -149,11 +149,11 @@ MPI_Sendrecv evita deadlock sem depender de ordem de envio e recepção. Nas pon
 
 - MPI_Gatherv: reúne a grade final no processo 0 para calcular o hash de validação. Esse passo fica fora da região cronometrada.
 
-### 6.4 Modelo de custo {#modelo-de-custo}
+### 6.4 Modelo de custo
 
 Por passo e por processo, o cálculo é proporcional a (N/P)·N e a comunicação é de 2N doubles, constante em P. Portanto, com N fixo, a razão comunicação/cálculo cresce linearmente com P. Isso explica por que a eficiência do MPI cai com mais processos, e mais rapidamente quanto menor o N.
 
-## 7. Validação de corretude {#validação-de-corretude}
+## 7. Validação de corretude
 
 Todas as versões imprimem, além do checksum e do tempo, um hash FNV-1a de 64 bits calculado sobre os bytes da grade final em ordem de linhas. Hashes iguais significam grades idênticas bit a bit. Isso é possível porque a atualização de cada célula não depende da ordem de execução; apenas a soma do checksum muda de ordem em reduction e MPI_Reduce, o que gera diferenças da ordem de 1e-13 e por isso é comparada com tolerância relativa de 1e-9.
 
@@ -169,11 +169,11 @@ O script scripts/validar.sh executa 144 comparações contra o baseline instrume
 
 Resultado: todas as comparações passaram. Nas medições, as 470 execuções de OpenMP e MPI produziram um único hash para cada par (N, T), isto é, o resultado não muda com o número de threads ou de processos.
 
-## 8. Resultados experimentais {#resultados-experimentais}
+## 8. Resultados experimentais
 
 As figuras abaixo foram geradas pelo script `scripts/plotar.py` a partir dos CSVs de `dados/`; os arquivos estão em `graficos/` (notebookfelipe\_\*.png).
 
-### 8.1 Escalabilidade forte {#escalabilidade-forte}
+### 8.1 Escalabilidade forte 
 
 Speedup (mediana de 10 repetições):
 
@@ -211,7 +211,7 @@ Com 1 thread ou 1 processo, os speedups ficam entre 0,92 e 1,07, ou seja, o cust
 
 *Figura 3 — Tempo do laço em função do número de threads ou processos, por tamanho de grade*
 
-### 8.2 Escalabilidade fraca {#escalabilidade-fraca}
+### 8.2 Escalabilidade fraca 
 
 Com N² / p constante (N = 1000, 1414, 2000, 2828 e 3464 para p = 1, 2, 4, 8 e 12), a eficiência T(1)/T(p) foi:
 
@@ -226,7 +226,7 @@ O tempo cresce quase linearmente com p, que é o comportamento esperado de um pr
 
 *Figura 4 — Eficiência da escalabilidade fraca, T(1)/T(p)*
 
-### 8.3 Overhead de comunicação (MPI) {#overhead-de-comunicação-mpi}
+### 8.3 Overhead de comunicação (MPI) 
 
 Fração do tempo do laço gasta na troca de bordas (média entre processos):
 
@@ -242,7 +242,7 @@ O comportamento confirma o modelo da seção 6.4. Esse tempo inclui a espera pel
 
 *Figura 5 — Fração do tempo gasta em comunicação no MPI (troca de bordas)*
 
-### 8.4 Políticas de escalonamento (OpenMP, N=2000, 12 threads) {#políticas-de-escalonamento-openmp-n2000-12-threads}
+### 8.4 Políticas de escalonamento (OpenMP, N=2000, 12 threads)
 
 | Política                   | Mediana (s) |
 |----------------------------|-------------|
@@ -257,7 +257,7 @@ A carga por linha é uniforme, portanto não há desbalanceamento de trabalho. M
 
 *Figura 6 — Tempo do laço por política de escalonamento (N=2000, 12 threads)*
 
-### 8.5 Proteção da soma (N=1000, 12 threads) {#proteção-da-soma-n1000-12-threads}
+### 8.5 Proteção da soma (N=1000, 12 threads) 
 
 | Proteção  | Tempo da soma (s) | Relativo      |
 |-----------|-------------------|---------------|
@@ -271,7 +271,7 @@ atomic e critical serializam as 10⁶ somas; reduction acumula parciais privadas
 
 *Figura 7 — Tempo da soma com reduction, atomic e critical (escala logarítmica)*
 
-## 9. Discussão: por que o ganho real difere do teórico {#discussão-por-que-o-ganho-real-difere-do-teórico}
+## 9. Discussão: por que o ganho real difere do teórico 
 
 O ganho medido fica muito abaixo da previsão de Amdahl: por exemplo, 2,6× contra 3,8× com 4 threads em N=1000, e 1,5× contra 7,1× com 8 threads em N=2000. A fração serial (cerca de 2%) explica apenas uma parte pequena dessa diferença. As causas observadas, em ordem de importância:
 
@@ -285,7 +285,7 @@ O ganho medido fica muito abaixo da previsão de Amdahl: por exemplo, 2,6× cont
 
 5.  **False sharing:** não é relevante neste problema, como explicado na seção 5.2.
 
-## 10. Limitações e ameaças à validade {#limitações-e-ameaças-à-validade}
+## 10. Limitações e ameaças à validade 
 
 - **Deriva do sistema entre medições.** O baseline medido durante a coleta (N=500: 0,086 s) ficou mais lento do que o do perfilamento feito antes (0,063 s). Notebooks mudam de frequência com temperatura e energia, o que desloca todos os speedups. Os valores absolutos devem ser lidos como indicativos; as conclusões qualitativas (limite de banda, saturação entre 4 e 8 workers, queda com 12) se repetiram em duas rodadas de medição.
 
@@ -297,7 +297,7 @@ O ganho medido fica muito abaixo da previsão de Amdahl: por exemplo, 2,6× cont
 
 - **Estimativas não verificadas diretamente:** os 24 bytes por atualização e a hipótese dos núcleos heterogêneos.
 
-## 11. Conclusões {#conclusões}
+## 11. Conclusões 
 
 - As duas versões paralelas reproduzem exatamente o resultado do baseline, para qualquer número de threads ou processos testado.
 
@@ -309,9 +309,9 @@ O ganho medido fica muito abaixo da previsão de Amdahl: por exemplo, 2,6× cont
 
 - No MPI, a decomposição 1D é simples e correta, mas o volume de comunicação por processo é constante, o que limita a escalabilidade para N pequeno. Trabalhos futuros: decomposição 2D, sobreposição de comunicação e cálculo (MPI_Isend e MPI_Irecv), blocagem de cache no tempo e uma versão híbrida MPI+OpenMP.
 
-## 12. Reprodutibilidade {#reprodutibilidade}
+## 12. Reprodutibilidade 
 
-### 12.1 Estrutura do repositório {#estrutura-do-repositório}
+### 12.1 Estrutura do repositório 
 
 - sequencial/05_calor2d.cpp: baseline do professor, intocado;
 
@@ -327,7 +327,7 @@ O ganho medido fica muito abaixo da previsão de Amdahl: por exemplo, 2,6× cont
 
 - dados/ e graficos/: CSVs e figuras; ANALISE.md, README.md e AUTORES.md.
 
-### 12.2 Como executar {#como-executar}
+### 12.2 Como executar 
 
 docker build -t calor2d .\
 docker run -it \--rm -v \$PWD:/workspace calor2d\
